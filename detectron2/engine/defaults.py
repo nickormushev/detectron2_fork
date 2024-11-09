@@ -13,6 +13,7 @@ import argparse
 import logging
 import os
 import sys
+import json
 import weakref
 from collections import OrderedDict
 from typing import Optional
@@ -20,8 +21,12 @@ import torch
 from fvcore.nn.precise_bn import get_bn_modules
 from omegaconf import OmegaConf
 from torch.nn.parallel import DistributedDataParallel
+import numpy as np
+import PIL.Image as Image
+from panopticapi.utils import rgb2id
 
 import detectron2.data.transforms as T
+from detectron2.data.detection_utils import read_image
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import CfgNode, LazyConfig
 from detectron2.data import (
@@ -313,6 +318,10 @@ class DefaultPredictor:
         self.cfg = cfg.clone()  # cfg can be modified by model
         self.model = build_model(self.cfg)
         self.model.eval()
+        self.gt_img_id = None
+        self.gt_img_base = "./datasets/ADEChallengeData2016/ade20k_panoptic_val/"
+        self.gt_json = "./datasets/ADEChallengeData2016/ade20k_panoptic_val.json"
+        self.mapper = None
         if len(cfg.DATASETS.TEST):
             self.metadata = MetadataCatalog.get(cfg.DATASETS.TEST[0])
 
@@ -325,6 +334,29 @@ class DefaultPredictor:
 
         self.input_format = cfg.INPUT.FORMAT
         assert self.input_format in ["RGB", "BGR"], self.input_format
+    
+    def get_gt_data(self):
+        with open(self.gt_json, 'r') as f:
+            gt_json = json.load(f)
+        
+        img_path = os.path.join(self.gt_img_base, self.gt_img_id + ".png")
+        gt_img = np.array(Image.open(img_path), dtype=np.int64)
+        gt_ann = [ann for ann in gt_json['annotations'] if ann['image_id'] == self.gt_img_id]
+
+        instances = None
+        gt_ann = gt_ann[0]
+        if self.mapper is not None:
+            gt_ann['file_name'] = os.path.join(self.gt_img_base, "..", "images", "validation", self.gt_img_id + ".jpg")
+            gt_ann['pan_seg_file_name'] = img_path
+            sem_annotations_dir = os.path.join(self.gt_img_base, "..", "annotations", "validation")
+            gt_ann['sem_seg_file_name'] = os.path.join(sem_annotations_dir, self.gt_img_id + ".png")
+
+            # It actually returns gt_ann with instances. See if possible to remove instances in that case
+            instances = self.mapper(gt_ann)['instances']
+
+
+        return gt_img, gt_ann, instances
+
 
     def __call__(self, original_image):
         """
@@ -346,7 +378,13 @@ class DefaultPredictor:
             image = torch.as_tensor(image.astype("float32").transpose(2, 0, 1))
             image.to(self.cfg.MODEL.DEVICE)
 
-            inputs = {"image": image, "height": height, "width": width}
+            inputs = {"image": image, "height": height, "width": width, "gt": False}
+
+            if self.gt_img_id is not None:
+                gt_img, gt_ann, instances = self.get_gt_data()
+                inputs = {"image": image, "height": height, "width": width,
+                          "gt": True, "gt_img": gt_img, "gt_ann": gt_ann, 
+                          "instances": instances}
 
             predictions = self.model([inputs])[0]
             return predictions
