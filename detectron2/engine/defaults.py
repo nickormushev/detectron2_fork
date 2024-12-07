@@ -319,7 +319,8 @@ class DefaultPredictor:
         self.model = build_model(self.cfg)
         self.model.eval()
         self.gt_img_id = None
-        self.class_oracle = False
+        self.test_cfg = None
+
         self.gt_img_base = "./datasets/ADEChallengeData2016/ade20k_panoptic_val/"
         self.gt_json = "./datasets/ADEChallengeData2016/ade20k_panoptic_val.json"
         self.mapper = None
@@ -379,14 +380,13 @@ class DefaultPredictor:
             image = torch.as_tensor(image.astype("float32").transpose(2, 0, 1))
             image.to(self.cfg.MODEL.DEVICE)
 
-            inputs = {"image": image, "height": height, "width": width, "class_oracle": False}
+            inputs = {"image": image, "height": height, "width": width, "test_cfg": self.test_cfg}
 
-            if self.gt_img_id is not None:
+            if self.test_cfg.use_class_oracle:
                 gt_img, gt_ann, instances = self.get_gt_data()
                 inputs = {"image": image, "height": height, "width": width,
-                          "class_oracle": self.class_oracle,
                           "gt_img": gt_img, "gt_ann": gt_ann, 
-                          "instances": instances}
+                          "instances": instances, "test_cfg": self.test_cfg}
 
             predictions = self.model([inputs])[0]
             return predictions
