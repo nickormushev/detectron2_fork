@@ -382,7 +382,7 @@ class DefaultPredictor:
 
             inputs = {"image": image, "height": height, "width": width, "test_cfg": self.test_cfg}
 
-            if self.test_cfg.use_class_oracle:
+            if self.test_cfg.use_oracle:
                 gt_img, gt_ann, instances = self.get_gt_data()
                 inputs = {"image": image, "height": height, "width": width,
                           "gt_img": gt_img, "gt_ann": gt_ann, 
